@@ -13,7 +13,9 @@ class SensorPlan( Plan ):
     self.sock = None
     self.peer = peer
     self.message_received = False
-     
+    self.r = self.robot
+    self.estimator = state_estimator(self.r.at.LEFT.get_position(), self.r.at.RIGHT.get_position())
+
   def _connect( self ):
     s = socket(AF_INET, SOCK_STREAM)
     try:
@@ -57,8 +59,34 @@ class SensorPlan( Plan ):
       progress("Message received at: " + str(ts))
       for k,v in dic:
         progress("   %s : %s" % (k,repr(v)))
+	
+      if('b' or 'f' in dic):
+				self.estimator(dic('b'), dic('f'), 
+										self.r.at.LEFT.get_pos(), self.r.at.RIGHT.get_pos(), dic('w'))
+			else:
+				yield
+				continue
+
       self.message_received = True
       yield self.forDuration(0.3)
+
+
+class state_estimator:
+	def __init__(self, initial_L, initial_R):
+		self.angle_est = math.PI
+		self.L_prev = initial_L
+		self.R_prev = initial_R
+		self.angle_prev = math.PI
+	def estimate_angle(self, b, f, encoder_L, encoder_R, ways):
+		self.delta_L = encoder_L - self.L_prev
+		self.delta_R = encoder_R - sefl.R_prev
+		self.L_prev = encoder_L
+		self.R_prev = encoder_R
+
+		self.angle_prev = self.angle_est
+		
+		
+
 
 class encoder_plan( Plan ):
   def __init__(self, *arg, **kw):
@@ -74,16 +102,12 @@ class encoder_plan( Plan ):
     while True:
         self.L = self.r.at.LEFT.get_pos()
         self.R = self.r.at.RIGHT.get_pos()
-
-        self.delta_L = self.L - self.L_prev 
-        self.delta_R = self.R = self.R_prev
-
-        self.L_prev = self.L
-        self.R_prev = self.R
 	
-        progress("L: %s  , R: %s" % (self.delta_L, self.delta_R))
+        progress("L: %s  , R: %s" % (self.L, self.R))
         yield self.forDuration(0.3)
-    
+  
+
+  
 class navigator( Plan ):
   def __init__(self, *arg, **kw):
     Plan.__init__(self,*arg,**kw)
@@ -92,19 +116,9 @@ class navigator( Plan ):
   def onStart( self ):
     self.r.at.LEFT.set_torque(0)
     self.r.at.RIGHT.set_torque(0)
-  
-class state_estimator:
-  def __init__(self):
-    self.rate = .3
 
-  def sensor_angle(self, front, back):
-    self.dummy = 1
 
-  def encoder_angle(self, delta_L, delta_R):
-    self.dummy = 1
 
-  def estimate_state(self, encoder_est, sensor_est)
-    self.dummy = 1
 
 class Joy_interface( JoyApp ):
   
@@ -115,7 +129,7 @@ class Joy_interface( JoyApp ):
     # JoyApp.__init__(self, *arg, **kw)
   def onStart( self ):
     # Set up the sensor receiver plan
-    self.sensor = SensorPlan(self,("67.194.202.70",8080))
+    self.sensor = SensorPlan(self,("67.194.202.70",8080), robot = self.robot)
     self.sensor.start()
     self.encoder = encoder_plan(self, robot = self.robot)
     self.encoder.start()
