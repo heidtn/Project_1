@@ -3,6 +3,7 @@ from socket import socket, AF_INET, SOCK_STREAM, error as SocketError
 from json import loads as json_loads
 import ckbot.logical as L
 import math
+import PD
 
 wheel_radius = 0.0619 # meter
 rad_per_click = math.pi/3000
@@ -70,6 +71,7 @@ class SensorPlan( Plan ):
         self.lpos = self.r.at.LEFT.get_pos()
         self.rpos = self.r.at.RIGHT.get_pos()
         self.estimator.estimate_state(dic('b'), dic('f'), self.lpos, self.rpos, dic('w'))
+        print self.estimator.theta
       else:
 				yield
 				continue
@@ -146,16 +148,17 @@ class navigator( Plan ):
 class Joy_interface( JoyApp ):
   
   def __init__(self,spec,*arg,**kw): 
-    L.DEFAULT_PORT = "/dev/ttyACM0"
+    # L.DEFAULT_PORT = "/dev/ttyACM0"
     JoyApp.__init__(self, robot = {'count':3}, *arg,**kw)
     self.teleop = True
+    self.PD = PD.PD(1, 1)
     # JoyApp.__init__(self, *arg, **kw)
   def onStart( self ):
     # Set up the sensor receiver plan
     self.sensor = SensorPlan(self,("67.194.202.70",8080), robot = self.robot)
     self.sensor.start()
-    # self.encoder = encoder_plan(self, robot = self.robot)
-    # self.encoder.start()
+    self.encoder = encoder_plan(self, robot = self.robot)
+    self.encoder.start()
     
   def onEvent( self, evt ):
     
@@ -173,7 +176,8 @@ class Joy_interface( JoyApp ):
           else:
             self.robot.at.RIGHT.set_torque(-1*(evt.value - 127.0/2)/(127.0/2))
         elif(evt.kind=='knob' and evt.index==1):
-          self.robot.at.LASER.set_torque((evt.value - 63.5)/63.5)
+          self.dummy = 1
+          #self.laser_error = 
       if(evt.kind == 'play' and evt.value == 127):
         self.teleop = not self.teleop 
 
