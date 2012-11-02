@@ -1,6 +1,7 @@
 from joy import *
 from socket import socket, AF_INET, SOCK_STREAM, error as SocketError
 from json import loads as json_loads
+import math
 
 class SensorPlan( Plan ):
   """
@@ -14,7 +15,7 @@ class SensorPlan( Plan ):
     self.peer = peer
     self.message_received = False
     self.r = self.robot
-    self.estimator = state_estimator(self.r.at.LEFT.get_position(), self.r.at.RIGHT.get_position())
+    self.estimator = state_estimator(self.r.at.LEFT.get_pos(), self.r.at.RIGHT.get_pos())
 
   def _connect( self ):
     s = socket(AF_INET, SOCK_STREAM)
@@ -60,10 +61,11 @@ class SensorPlan( Plan ):
       for k,v in dic:
         progress("   %s : %s" % (k,repr(v)))
 	
-      if('b' or 'f' in dic):
-				self.estimator(dic('b'), dic('f'), 
-										self.r.at.LEFT.get_pos(), self.r.at.RIGHT.get_pos(), dic('w'))
-			else:
+      if('b' and 'f' in dic):
+        self.lpos = self.r.at.LEFT.get_pos()
+        self.rpos = self.r.at.RIGHT.get_pos()
+        self.estimator.estimate_state(dic('b'), dic('f'), self.lpos, self.rpos, dic('w'))
+      else:
 				yield
 				continue
 
@@ -73,11 +75,11 @@ class SensorPlan( Plan ):
 
 class state_estimator:
 	def __init__(self, initial_L, initial_R):
-		self.angle_est = math.PI
+		self.angle_est = math.pi
 		self.L_prev = initial_L
 		self.R_prev = initial_R
-		self.angle_prev = math.PI
-	def estimate_angle(self, b, f, encoder_L, encoder_R, ways):
+		self.angle_prev = math.pi
+	def estimate_state(self, b, f, encoder_L, encoder_R, ways):
 		self.delta_L = encoder_L - self.L_prev
 		self.delta_R = encoder_R - sefl.R_prev
 		self.L_prev = encoder_L
@@ -117,6 +119,11 @@ class navigator( Plan ):
     self.r.at.LEFT.set_torque(0)
     self.r.at.RIGHT.set_torque(0)
 
+  def behavior( self ):
+    while 1:
+
+  def onEvent( self, evt):
+    self.dummy = 1
 
 
 
@@ -131,8 +138,8 @@ class Joy_interface( JoyApp ):
     # Set up the sensor receiver plan
     self.sensor = SensorPlan(self,("67.194.202.70",8080), robot = self.robot)
     self.sensor.start()
-    self.encoder = encoder_plan(self, robot = self.robot)
-    self.encoder.start()
+    # self.encoder = encoder_plan(self, robot = self.robot)
+    # self.encoder.start()
     
   def onEvent( self, evt ):
     
@@ -152,12 +159,15 @@ class Joy_interface( JoyApp ):
       #every time tick, navigate
       if(self.sensor.message_received):
         self.sensor.message_received = False  
-      return JoyApp.onEvent(self, evt)
+    return JoyApp.onEvent(self, evt)
     
   
   def onStop( self ):
+    self.robot.at.LEFT.go_slack()
+    self.robot.at.RIGHT.go_slack()
+    self.robot.at.LASER.go_slack()
     self.sensor.stop()
-    self.encoder.stop()
+    # self.encoder.stop()
     return super( Joy_interface, self ).onStop()
       
 if __name__=="__main__":
