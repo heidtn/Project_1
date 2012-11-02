@@ -4,6 +4,10 @@ from json import loads as json_loads
 import ckbot.logical as L
 import math
 
+wheel_radius = 0.0619 # meter
+rad_per_click = math.pi/3000
+robot_width = 0.149 # meter
+
 class SensorPlan( Plan ):
   """
   SensorPlan is a concrete Plan subclass that uses the self.app's
@@ -80,6 +84,10 @@ class state_estimator:
 		self.L_prev = initial_L
 		self.R_prev = initial_R
 		self.angle_prev = math.pi
+		self.x = 0
+		self.y = 0
+		self.theta = 0
+
 	def estimate_state(self, b, f, encoder_L, encoder_R, ways):
 		self.delta_L = encoder_L - self.L_prev
 		self.delta_R = encoder_R - sefl.R_prev
@@ -89,6 +97,13 @@ class state_estimator:
 		self.angle_prev = self.angle_est
 		
 		
+		self.delta_x = math.cos(self.theta)*(self.delta_L+self.delta_R)*rad_per_click*wheel_radius/2
+		self.delta_y = math.sin(self.theta)*(self.delta_L+self.delta_R)*rad_per_click*wheel_radius/2
+		self.delta_theta = math.atan((self.delta_R-self.delta_L)*rad_per_click*wheel_radius/robot_width)
+
+		self.x = self.x + self.delta_x
+		self.y = self.y + self.delta_y
+		self.theta = self.theta + self.delta_theta
 
 
 class encoder_plan( Plan ):
