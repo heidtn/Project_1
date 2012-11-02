@@ -1,6 +1,7 @@
 from joy import *
 from socket import socket, AF_INET, SOCK_STREAM, error as SocketError
 from json import loads as json_loads
+import ckbot.logical as L
 import math
 
 class SensorPlan( Plan ):
@@ -121,7 +122,7 @@ class navigator( Plan ):
 
   def behavior( self ):
     while 1:
-
+      self.dummy = 1
   def onEvent( self, evt):
     self.dummy = 1
 
@@ -129,10 +130,10 @@ class navigator( Plan ):
 
 class Joy_interface( JoyApp ):
   
-  def __init__(self,spec,*arg,**kw):
+  def __init__(self,spec,*arg,**kw): 
+    L.DEFAULT_PORT = "/dev/ttyACM0"
     JoyApp.__init__(self, robot = {'count':3}, *arg,**kw)
     self.teleop = True
-    
     # JoyApp.__init__(self, *arg, **kw)
   def onStart( self ):
     # Set up the sensor receiver plan
@@ -147,11 +148,17 @@ class Joy_interface( JoyApp ):
       #teleoperation commands
       if(self.teleop == True):
         if(evt.kind=='slider' and evt.index==1):
-          self.robot.at.LEFT.set_torque(evt.value/127.0)
+          if(evt.value < 66 and evt.value > 60):
+            self.robot.at.LEFT.set_torque(0)
+          else:
+            self.robot.at.LEFT.set_torque((evt.value - 127.0/2)/(127.0/2))
         elif(evt.kind=='slider' and evt.index==2):
-          self.robot.at.RIGHT.set_torque(evt.value/127.0)
+          if(evt.value < 66 and evt.value > 60):
+            self.robot.at.RIGHT.set_torque(0)
+          else:
+            self.robot.at.RIGHT.set_torque(-1*(evt.value - 127.0/2)/(127.0/2))
         elif(evt.kind=='knob' and evt.index==1):
-          self.robot.at.LASER.set_torque(evt.value/127.0)
+          self.robot.at.LASER.set_torque((evt.value - 63.5)/63.5)
       if(evt.kind == 'play' and evt.value == 127):
         self.teleop = not self.teleop 
 
@@ -163,9 +170,9 @@ class Joy_interface( JoyApp ):
     
   
   def onStop( self ):
-    self.robot.at.LEFT.go_slack()
-    self.robot.at.RIGHT.go_slack()
-    self.robot.at.LASER.go_slack()
+    self.robot.at.LEFT.set_torque(0)
+    self.robot.at.RIGHT.set_torque(0)
+    self.robot.at.LASER.set_torque(0)
     self.sensor.stop()
     # self.encoder.stop()
     return super( Joy_interface, self ).onStop()
