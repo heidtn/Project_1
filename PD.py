@@ -2,6 +2,8 @@ class PD:
   def __init__( self, pgain, dgain):
     self.pgain = pgain
     self.dgain = dgain
+    self.P = 0
+    self.D = 0
     self.first_call = True
 
   def process( self, error, timestamp):
@@ -11,6 +13,10 @@ class PD:
     self.P = error
     self.D = (error - self.prev_error)/timestamp
     self.prev_error = error
+    self.val = self.pgain*self.P + self.dgain*self.D
+    return self.val
+  
+  def process_deadband(self, error, timestamp):
     self.val = self.pgain*self.P + self.dgain*self.D
     return self.val
 

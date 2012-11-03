@@ -4,6 +4,7 @@ from json import loads as json_loads
 import ckbot.logical as L
 import math
 import PD
+import argparse
 
 wheel_radius = 0.0619 # meter
 rad_per_click = math.pi/3000
@@ -40,7 +41,7 @@ class SensorPlan( Plan ):
 
   def behavior( self ):
     while True:
-      # if not connected --> try to connect
+      """      # if not connected --> try to connect
       if self.sock is None:
         self._connect()
       # if not connected --> sleep for a bit
@@ -66,18 +67,15 @@ class SensorPlan( Plan ):
       progress("Message received at: " + str(ts))
       for k,v in dic:
         progress("   %s : %s" % (k,repr(v)))
-	
-      if('b' and 'f' in dic):
-        self.lpos = self.r.at.LEFT.get_pos()
-        self.rpos = self.r.at.RIGHT.get_pos()
-        self.estimator.estimate_state(dic('b'), dic('f'), self.lpos, self.rpos, dic('w'))
-        print self.estimator.theta
-      else:
-				yield
-				continue
-
+      """
+      dic = [0, 0]	
+      self.lpos = self.r.at.LEFT.get_pos()
+      self.rpos = self.r.at.RIGHT.get_pos()
+      self.estimator.estimate_state(dic[0], dic[1], self.lpos, self.rpos, [])
+      progress(str(self.lpos % 45000))
       self.message_received = True
-      yield self.forDuration(0.3)
+      
+      yield self.forDuration(0.1)
 
 
 class state_estimator:
@@ -92,21 +90,20 @@ class state_estimator:
 
 	def estimate_state(self, b, f, encoder_L, encoder_R, ways):
 		self.delta_L = encoder_L - self.L_prev
-		self.delta_R = encoder_R - sefl.R_prev
+		self.delta_R = encoder_R - self.R_prev
 		self.L_prev = encoder_L
 		self.R_prev = encoder_R
 
 		self.angle_prev = self.angle_est
 		
-		self.delta_theta = self.delta_R-self.delta_L) * rad_per_click * wheel_radius/robot_width
-		self.delta_x = math.cos(self.theta+self.delta_theta/2) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/	self.delta_theta*math.sin(self.delta_theta/2)
-		self.delta_y = math.sin(self.theta+self.delta_theta/2) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/self.delta_theta*math.sin(self.delta_theta/2)
+		self.delta_theta = (self.delta_R-self.delta_L) * rad_per_click * wheel_radius/robot_width
+		#self.delta_x = math.cos(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/	self.delta_theta*math.sin(self.delta_theta/2.0)
+		#self.delta_y = math.sin(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/self.delta_theta*math.sin(self.delta_theta/2.0)
 		
 
-		self.x = self.x + self.delta_x
-		self.y = self.y + self.delta_y
+		#self.x = self.x + self.delta_x
+		#self.y = self.y + self.delta_y
 		self.theta = self.theta + self.delta_theta
-
 
 class encoder_plan( Plan ):
   def __init__(self, *arg, **kw):
@@ -148,17 +145,20 @@ class navigator( Plan ):
 class Joy_interface( JoyApp ):
   
   def __init__(self,spec,*arg,**kw): 
+    
     # L.DEFAULT_PORT = "/dev/ttyACM0"
     JoyApp.__init__(self, robot = {'count':3}, *arg,**kw)
     self.teleop = True
-    self.PD = PD.PD(1, 1)
+    self.knob_pos = 0
+    self.laser_PD = PD.PD(-79.0/1270.0, -32.0/127.0)
     # JoyApp.__init__(self, *arg, **kw)
   def onStart( self ):
     # Set up the sensor receiver plan
     self.sensor = SensorPlan(self,("67.194.202.70",8080), robot = self.robot)
     self.sensor.start()
-    self.encoder = encoder_plan(self, robot = self.robot)
-    self.encoder.start()
+    #self.encoder = encoder_plan(self, robot = self.robot)
+    #self.encoder.start()
+    self.dummy = 1
     
   def onEvent( self, evt ):
     
@@ -176,18 +176,42 @@ class Joy_interface( JoyApp ):
           else:
             self.robot.at.RIGHT.set_torque(-1*(evt.value - 127.0/2)/(127.0/2))
         elif(evt.kind=='knob' and evt.index==1):
-          self.dummy = 1
-          #self.laser_error = 
+          self.knob_pos = (evt.value/127.0)*30000.0
+          self.laser_PD_controller()
+        elif(evt.kind=='knob' and evt.index==2):
+          self.laser_PD.set_pgain(-1*evt.value/1270.0)
+        elif(evt.kind=='knob' and evt.index==3):
+          self.laser_PD.set_dgain(-1*evt.value/127.0)
       if(evt.kind == 'play' and evt.value == 127):
         self.teleop = not self.teleop 
 
     elif(evt.type == TIMEREVENT):
+      self.laser_PD_controller()
       #every time tick, navigate
-      if(self.sensor.message_received):
-        self.sensor.message_received = False  
-    return JoyApp.onEvent(self, evt)
+      #if(self.sensor.message_received):
+        #self.sensor.message_received = False
+    # return JoyApp.onEvent(self, evt)
     
-  
+  def laser_PD_controller( self ):
+    self.laser_pos = self.robot.at.LASER.get_pos()
+    self.laser_error = self.laser_pos % 30000.0
+    self.laser_error -= self.knob_pos
+    self.laser_error /= 1000.0
+    if(self.laser_error == 14043.0):
+      # upper dead band
+      self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
+    elif(self.laser_error == -14016):
+      # lower dead band
+      self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
+    else:
+      self.new_torque =  self.laser_PD.process(self.laser_error, 1.0)
+
+    if(self.new_torque > 1):
+      self.new_torque = 1
+    elif(self.new_torque < -1):
+      self.new_torque = -1 
+    self.robot.at.LASER.set_torque(self.new_torque)
+
   def onStop( self ):
     self.robot.at.LEFT.set_torque(0)
     self.robot.at.RIGHT.set_torque(0)
