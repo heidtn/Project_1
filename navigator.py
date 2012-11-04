@@ -97,8 +97,8 @@ class state_estimator:
 		self.angle_prev = self.angle_est
 		
 		self.delta_theta = (self.delta_R-self.delta_L) * rad_per_click * wheel_radius/robot_width
-		#self.delta_x = math.cos(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/	self.delta_theta*math.sin(self.delta_theta/2.0)
-		#self.delta_y = math.sin(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/self.delta_theta*math.sin(self.delta_theta/2.0)
+		#self.delta_x = math.cos(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/2
+		#self.delta_y = math.sin(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/2
 		
 
 		#self.x = self.x + self.delta_x
