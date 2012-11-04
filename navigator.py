@@ -23,8 +23,9 @@ class SensorPlan( Plan ):
     self.message_received = False
     self.r = self.robot
     self.estimator = state_estimator(self.r.at.LEFT.get_pos(), self.r.at.RIGHT.get_pos())
-    self.navigator = navigator(self.r)    
+    self.navigator = navigator(self.robot)    
     self.autonomy = False
+    self.sensor_enable = True
 
   def _connect( self ):
     s = socket(AF_INET, SOCK_STREAM)
@@ -43,67 +44,87 @@ class SensorPlan( Plan ):
 
   def behavior( self ):
     while True:
-      # if not connected --> try to connect
-      if self.sock is None:
-        self._connect()
-      # if not connected --> sleep for a bit
-      if self.sock is None:
-        yield self.forDuration(0.1)
-        continue
-      # receive an update / skip
-      try:
-        msg = self.sock.recv(1024)
-      except SocketError, se:
-        # If there was no data on the socket --> not a real error, else
-        if se.errno != 11:
-          progress("Connection failed: "+str(se))
-          self.sock.close()
-          self.sock = None
-        yield
-        continue
-      ts = self.app.now
-      dic = json_loads(msg)
-      assert type(dic) is dict
-      # dic = dic.items()
-      # dic.sort()
-      # progress("Message received at: " + str(ts))
-      # for k,v in dic:
-      #  progress("   %s : %s" % (k,repr(v)))
-      
-      self.lpos = self.r.at.LEFT.get_pos()
-      self.rpos = self.r.at.RIGHT.get_pos()
-      self.estimator.estimate_state(dic['b'], dic['f'], self.lpos, self.rpos, [])
-      
+      if(self.sensor_enable):
+        # if not connected --> try to connect
+        if self.sock is None:
+          self._connect()
+        # if not connected --> sleep for a bit
+        if self.sock is None:
+          yield self.forDuration(0.1)
+          continue
+        # receive an update / skip
+        try:
+          msg = self.sock.recv(1024)
+        except SocketError, se:
+          # If there was no data on the socket --> not a real error, else
+          if se.errno != 11:
+            progress("Connection failed: "+str(se))
+            self.sock.close()
+            self.sock = None
+          yield
+          continue
+        
+        ts = self.app.now
+        
+        try: 
+          dic = json_loads(msg)
+        except ValueError:
+          continue
+        assert type(dic) is dict
+        # dic = dic.items()
+        # dic.sort()
+        # progress("Message received at: " + str(ts))
+        # for k,v in dic:
+        #  progress("   %s : %s" % (k,repr(v)))
+        
+        # dic = {'b':255, 'f':255}      
+        self.lpos = self.r.at.LEFT.get_pos()
+        self.rpos = self.r.at.RIGHT.get_pos()
+        # self.estimator.estimate_state(dic['b'], dic['f'], self.lpos, self.rpos, [])
+        progress(repr(dic))      
       if(self.autonomy):
+        if(not self.sensor_enable):
+          dic = {'b':255, 'f':255}
         self.navigator.navigate(self.estimator, dic['b'], dic['f'])
+          
        
-      yield self.forDuration(0.1)
-  
+      yield self.forDuration(0.3)
+ 
+  def set_pgain(self, setter):
+    self.navigator.PD.set_pgain(setter)
+
+  def set_dgain(self, setter):
+    self.navigator.PD.set_dgain(setter)
+   
   def set_autonomous(self, setter):
     self.autonomy = setter
 
 
 class navigator:
   def __init__(self, robot):
-    self.max_speed = .5
-    self.center_speed = .2
+    self.max_speed = .4
+    self.center_speed = .1
     self.r = robot.at
-    self.PD = PD(0.0, 0.0)  
+    self.PD = PD.PD(0.005, 0.1)  
 
   def navigate(self, estimator, b, f):
     if(f < 3 and b < 3):
       return
       # in this case we have most likely lost sensor data.  
       # Wander or try and find the way back
-    self.error = 255 - (b + f)/2.0 #get average error
-    self.correction = self.PD.process(self.error. 1.0)
-    self.set_dir(correction)    
+    self.error = abs(-b + f)/2.0 #get average error
+    if(b < f):
+      self.error *= -1
+    # self.error = int(raw_input("enter an error value: "))
+    self.correction = self.PD.process(self.error, 1.0)
+    self.set_dir(self.correction)
+    progress("error: %s  correction: %s" %  (str(self.error), str(self.correction)))    
 
   def set_dir(self, direction):
     # direction is value from 1 (right) to -1 (left)
-    self.right_speed = self.center_speed + direction/5.0
-    self.left_speed = self.center_speed - direction/5.0
-    self.right_speed = self.saturate(self.right_speed)
+    self.right_speed = self.center_speed + direction/30.0
+    self.left_speed = self.center_speed - direction/30.0
+    self.right_speed = -1*self.saturate(self.right_speed)
     self.left_speed = self.saturate(self.left_speed)
     self.r.LEFT.set_torque(self.left_speed)
     self.r.RIGHT.set_torque(self.right_speed)
@@ -117,72 +138,43 @@ class navigator:
       return val
 
 class state_estimator:
-	def __init__(self, initial_L, initial_R):
-		self.angle_est = math.pi
-		self.L_prev = initial_L
-		self.R_prev = initial_R
-		self.angle_prev = math.pi
-		self.x = 0
-		self.y = 0
-		self.theta = 0
-
-	def estimate_state(self, b, f, encoder_L, encoder_R, ways):
-		self.delta_L = encoder_L - self.L_prev
-		self.delta_R = encoder_R - self.R_prev
-		self.L_prev = encoder_L
-		self.R_prev = encoder_R
-
-		self.angle_prev = self.angle_est
-		
-		self.delta_theta = (self.delta_R-self.delta_L) * rad_per_click * wheel_radius/robot_width
-		self.delta_x = math.cos(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/2
-		self.delta_y = math.sin(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/2
-		
-
-		self.x = self.x + self.delta_x
-		self.y = self.y + self.delta_y
-		self.theta = self.theta + self.delta_theta
-
-class encoder_plan( Plan ):
-  def __init__(self, *arg, **kw):
-    Plan.__init__(self,*arg,**kw)
-    self.r = self.robot
-    self.message_received = False
+  def __init__(self, initial_L, initial_R):
+    self.angle_est = math.pi
+    self.L_prev = initial_L
+    self.R_prev = initial_R
+    self.angle_prev = math.pi
+    self.x = 0
+    self.y = 0
+    self.theta = 0
     
-  def onStart( self ): 
-    self.L_prev = self.r.at.LEFT.get_pos()
-    self.R_prev = self.r.at.RIGHT.get_pos() 
+  def estimate_state(self, b, f, encoder_L, encoder_R, ways):
+    
+    self.delta_L = encoder_L - self.L_prev
+    self.delta_R = encoder_R - self.R_prev
+    self.L_prev = encoder_L
+    self.R_prev = encoder_R
+    
+    self.angle_prev = self.angle_est
+    
+    self.delta_theta = (self.delta_R-self.delta_L) * rad_per_click * wheel_radius/robot_width
+    self.delta_x = math.cos(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/2
+    self.delta_y = math.sin(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/2
+		
 
-  def behavior( self ):
-    while True:
-        self.L = self.r.at.LEFT.get_pos()
-        self.R = self.r.at.RIGHT.get_pos()
-	
-        progress("L: %s  , R: %s" % (self.L, self.R))
-        yield self.forDuration(0.3)
-  
+    self.x = self.x + self.delta_x
+    self.y = self.y + self.delta_y
+    self.theta = self.theta + self.delta_theta
 
-  
-class navigator( Plan ):
-  def __init__(self, *arg, **kw):
-    Plan.__init__(self,*arg,**kw)
-    self.r = self.robot
-  
-  def onStart( self ):
-    self.r.at.LEFT.set_torque(0)
-    self.r.at.RIGHT.set_torque(0)
-
-  def behavior( self ):
-    while 1:
-      self.dummy = 1
-  def onEvent( self, evt):
-    self.dummy = 1
-
-
+    print("x: " + str(self.x))
+    print("y: " + str(self.y))
+    print("theta: " + str(self.theta) + '\n') 
 
 class Joy_interface( JoyApp ):
   
   def __init__(self,spec,*arg,**kw): 
+    self.sensor_enable = True
+    self.motor_enable = True    
+
     try:
       opts, args = getopt.getopt(sys.argv[1:],"hwsm",["wireless","sensor_disable","motor_disable"])
     except getopt.GetoptError:
@@ -217,6 +209,8 @@ class Joy_interface( JoyApp ):
     # Set up the sensor receiver plan
     self.sensor = SensorPlan(self,("67.194.202.70",8080), robot = self.robot)
     self.sensor.start()
+    if(self.sensor_enable == False):
+      self.sensor.sensor_enable = False
     
   def onEvent( self, evt ):
     
@@ -240,15 +234,23 @@ class Joy_interface( JoyApp ):
           self.laser_PD.set_pgain(-1*evt.value/1270.0)
         elif(evt.kind=='knob' and evt.index==3):
           self.laser_PD.set_dgain(-1*evt.value/127.0)
+        elif(evt.kind=='knob' and evt.index==4):
+          self.sensor.set_pgain(-1*evt.value/1270.0)
+        elif(evt.kind=='knob' and evt.index==5):
+          self.sensor.set_dgain(-1*evt.value/127.0)
       if(evt.kind == 'play' and evt.value == 127):
         self.teleop = not self.teleop
-        self.sensor.set_autonomous(not self.teleop) 
-      if(evt.kind=='KEYDOWN' and evt.key == 27):
-        self.stop()
+        self.sensor.set_autonomous(not self.teleop)
+        if(self.teleop):
+          progress("entering teleoperation mode")
+        else:
+          progress("entering autonomous mode") 
+    if(evt.type is KEYDOWN and evt.key in [ord('q'),27]):
+      self.stop()
 
-    elif(evt.type == TIMEREVENT):
-      if(self.teleop):
-        self.laser_PD_controller()
+    #elif(evt.type == TIMEREVENT):
+      #if(self.teleop):
+      #  self.laser_PD_controller()
   
   def laser_PD_controller( self ):
     self.laser_pos = self.robot.at.LASER.get_pos()
