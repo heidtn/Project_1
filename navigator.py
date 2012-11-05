@@ -7,8 +7,10 @@ import PD
 import getopt
 
 wheel_radius = 0.0619 # meter
-rad_per_click = math.pi/3000
+rad_per_click = (math.pi*2)/40095
 robot_width = 0.149 # meter
+encoder_limit = 435036 + 14026
+laser_encoder_limit = 14043 + 14016
 
 class SensorPlan( Plan ):
   """
@@ -78,10 +80,16 @@ class SensorPlan( Plan ):
         #  progress("   %s : %s" % (k,repr(v)))
         
         # dic = {'b':255, 'f':255}      
-        self.lpos = self.r.at.LEFT.get_pos()
-        self.rpos = self.r.at.RIGHT.get_pos()
-        # self.estimator.estimate_state(dic['b'], dic['f'], self.lpos, self.rpos, [])
-        progress(repr(dic))      
+      
+
+      self.lpos = self.r.at.LEFT.get_pos()
+      self.rpos = self.r.at.RIGHT.get_pos()
+      
+      if(self.sensor_enable):      
+        self.estimator.estimate_state(dic['b'], dic['f'], self.lpos, self.rpos, [])
+      else: 
+        self.estimator.estimate_state(0, 0, self.lpos, self.rpos, [])
+
       if(self.autonomy):
         if(not self.sensor_enable):
           dic = {'b':255, 'f':255}
@@ -118,7 +126,7 @@ class navigator:
     # self.error = int(raw_input("enter an error value: "))
     self.correction = self.PD.process(self.error, 1.0)
     self.set_dir(self.correction)
-    progress("error: %s  correction: %s" %  (str(self.error), str(self.correction)))    
+    progress("error: %s  correction: %s" %  (str(self.error), str(self.correction))) 
 
   def set_dir(self, direction):
     # direction is value from 1 (right) to -1 (left)
@@ -149,8 +157,20 @@ class state_estimator:
     
   def estimate_state(self, b, f, encoder_L, encoder_R, ways):
     
+    encoder_L += 14026
+    encoder_R += 14026 
     self.delta_L = encoder_L - self.L_prev
     self.delta_R = encoder_R - self.R_prev
+    if(self.delta_L > encoder_limit/2.0):
+      self.delta_L -= encoder_limit
+    elif(self.delta_L < -encoder_limit/2.0):
+      self.delta_L += encoder_limit
+
+    if(self.delta_R > encoder_limit/2.0):
+      self.delta_R -= encoder_limit
+    elif(self.delta_R < -encoder_limit/2.0):
+      self.delta_R += encoder_limit
+
     self.L_prev = encoder_L
     self.R_prev = encoder_R
     
@@ -164,10 +184,12 @@ class state_estimator:
     self.x = self.x + self.delta_x
     self.y = self.y + self.delta_y
     self.theta = self.theta + self.delta_theta
+    self.theta %= 2.0*math.pi
+
 
     print("x: " + str(self.x))
     print("y: " + str(self.y))
-    print("theta: " + str(self.theta) + '\n') 
+    print("theta: " + str(self.theta * 180.0/math.pi) + '\n') 
 
 class Joy_interface( JoyApp ):
   
@@ -248,19 +270,30 @@ class Joy_interface( JoyApp ):
     if(evt.type is KEYDOWN and evt.key in [ord('q'),27]):
       self.stop()
 
-    #elif(evt.type == TIMEREVENT):
-      #if(self.teleop):
-      #  self.laser_PD_controller()
+    elif(evt.type == TIMEREVENT):
+      self.laser_PD_controller()
   
   def laser_PD_controller( self ):
-    self.laser_pos = self.robot.at.LASER.get_pos()
-    self.laser_error = self.laser_pos % 30000.0
-    self.laser_error -= self.knob_pos
-    self.laser_error /= 1000.0
-    if(self.laser_error == 14043.0):
+    self.laser_pos_reading = self.robot.at.LASER.get_pos()
+    self.laser_pos = self.laser_pos_reading + 14016.0
+    if(self.laser_pos > laser_encoder_limit/2.0):
+      self.laser_pos -= laser_encoder_limit
+    elif(self.laser_pos < -laser_encoder_limit/2.0):
+      self.laser_pos += laser_encoder_limit
+
+    self.laser_pos *= (math.pi*2.0/laser_encoder_limit)
+    
+    self.laser_error = self.laser_pos - self.sensor.estimator.theta
+    if(self.laser_error > math.pi):
+      self.laser_error -= 2.0*math.pi
+    elif(self.laser_error < -math.pi):
+      self.laser_error += 2.0*math.pi    
+
+    progress("laser position: %s" % str(self.laser_pos * 180.0/math.pi))
+    if(self.laser_pos_reading == 14043.0):
       # upper dead band
       self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
-    elif(self.laser_error == -14016):
+    elif(self.laser_pos_reading == -14016):
       # lower dead band
       self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
     else:
@@ -269,7 +302,8 @@ class Joy_interface( JoyApp ):
     if(self.new_torque > 1):
       self.new_torque = 1
     elif(self.new_torque < -1):
-      self.new_torque = -1 
+      self.new_torque = -1
+
     self.robot.at.LASER.set_torque(self.new_torque)
 
   def onStop( self ):
