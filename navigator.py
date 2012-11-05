@@ -186,6 +186,10 @@ class state_estimator:
     self.theta = self.theta + self.delta_theta
     self.theta %= 2.0*math.pi
 
+    if (self.theta>self.psi)
+    self.theta_2 = (self.psi + math.acos((b+f)/d))
+    elif self.theta_2 = (self.psi - math.acos((b+f)/d))
+
 
     print("x: " + str(self.x))
     print("y: " + str(self.y))
