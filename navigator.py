@@ -128,6 +128,22 @@ class navigator:
     self.set_dir(self.correction)
     progress("error: %s  correction: %s" %  (str(self.error), str(self.correction))) 
 
+  def turn(self, estimator):
+    # estimator contains both necessary thetas
+  
+    self.error = self.estimator.theta - self.estimator.psi
+   if(self.error > math.pi):
+     self.error -= 2.0*math.pi
+   elif(self.error < -math.pi):
+     self.error += 2.0*math.pi
+  
+   if(self.error < math.pi/8):
+     return False  
+   
+   self.r.LEFT.set_torque(.1)
+   self.r.RIGHT.set_torque(-.1)
+   return True
+
   def set_dir(self, direction):
     # direction is value from 1 (right) to -1 (left)
     self.right_speed = self.center_speed + direction/30.0
