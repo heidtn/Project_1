@@ -198,19 +198,21 @@ class Joy_interface( JoyApp ):
     self.motor_enable = True    
 
     try:
-      opts, args = getopt.getopt(sys.argv[1:],"hwsm",["wireless","sensor_disable","motor_disable"])
+      opts, args = getopt.getopt(sys.argv[1:],"hwsma",["wireless","sensor_disable","motor_disable","autonomous_mode"])
     except getopt.GetoptError:
       print """                 -h for help
                -w (--wireless) for wireless mode
                -s (--sensor_disable) for sensor disable
-               -m (--motor_disable) for motor disable"""
+               -m (--motor_disable) for motor disabl
+               -a (--autonomous_mode) for autonomous"""
       sys.exit(2)
     for opt, arg in opts:
       if opt == '-h': 
         print """  -h for help
   -w (--wireless) for wireless mode
   -s (--sensor_disable) for sensor disable
-  -m (--motor_disable) for motor disable"""
+  -m (--motor_disable) for motor disable
+  -a (--autonomous_mode) for autonomous"""
         sys.exit()
       elif opt in ("-w", "--wireless"):
         L.DEFAULT_PORT = "/dev/ttyACM0"
@@ -220,6 +222,8 @@ class Joy_interface( JoyApp ):
         progress("sensor has been disabled")   
       elif opt in ("-m", "--motor_disable"):
         self.motor_enable = False
+      elif opt in ("-a", "--autonomous_mode"):
+        self.teleop = False
     
     JoyApp.__init__(self, robot = {'count':3}, *arg,**kw)
     self.teleop = True
@@ -233,7 +237,9 @@ class Joy_interface( JoyApp ):
     self.sensor.start()
     if(self.sensor_enable == False):
       self.sensor.sensor_enable = False
-    
+    if(self.teleop == False):
+      self.sensor.set_autonomous(True)    
+
   def onEvent( self, evt ):
     
     if(evt.type == MIDIEVENT):
@@ -283,7 +289,7 @@ class Joy_interface( JoyApp ):
 
     self.laser_pos *= (math.pi*2.0/laser_encoder_limit)
     
-    self.laser_error = self.laser_pos - self.sensor.estimator.theta
+    self.laser_error = self.laser_pos - (math.pi/2.0 - self.sensor.estimator.theta)
     if(self.laser_error > math.pi):
       self.laser_error -= 2.0*math.pi
     elif(self.laser_error < -math.pi):
