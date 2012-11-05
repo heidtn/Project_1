@@ -9,8 +9,8 @@ import getopt
 wheel_radius = 0.0619 # meter
 rad_per_click = (math.pi*2)/40095
 robot_width = 0.149 # meter
-encoder_limit = 435036 + 14026
-laser_encoder_limit = 14043 + 14016
+encoder_limit = 435036.0 + 14026.0
+laser_encoder_limit = 14043.0 + 14016.0
 
 class SensorPlan( Plan ):
   """
@@ -28,6 +28,8 @@ class SensorPlan( Plan ):
     self.navigator = navigator(self.robot)    
     self.autonomy = False
     self.sensor_enable = True
+    self.spinning = False
+    self.ways = way_points()
 
   def _connect( self ):
     s = socket(AF_INET, SOCK_STREAM)
@@ -80,23 +82,30 @@ class SensorPlan( Plan ):
         #  progress("   %s : %s" % (k,repr(v)))
         
         # dic = {'b':255, 'f':255}      
-      
+        
+        if('w' in dic):
+          self.ways.newValueCheck(dic['w'])
 
       self.lpos = self.r.at.LEFT.get_pos()
       self.rpos = self.r.at.RIGHT.get_pos()
       
-      if(self.sensor_enable):      
-        self.estimator.estimate_state(dic['b'], dic['f'], self.lpos, self.rpos, [])
+      if(self.sensor_enable and self.ways.has_ways):      
+        self.estimator.estimate_state(dic['b'], dic['f'], self.lpos, self.rpos, self.ways)
       else: 
-        self.estimator.estimate_state(0, 0, self.lpos, self.rpos, [])
+        self.estimator.estimate_state(0, 0, self.lpos, self.rpos, self.ways)
 
+      yield
       if(self.autonomy):
         if(not self.sensor_enable):
           dic = {'b':255, 'f':255}
-        self.navigator.navigate(self.estimator, dic['b'], dic['f'])
-          
-       
-      yield self.forDuration(0.3)
+        if(self.ways.way_changed or self.spinning):
+          self.spinning = self.navigator.turn(self.estimator, self.ways.psi)
+        else: 
+          self.navigator.navigate(self.estimator, dic['b'], dic['f'], self.ways)
+      
+      progress("estimated angle:  %s    estimated psi:  %s" % (str(self.estimator.theta * 180.0/math.pi), str(self.ways.psi*180.0/math.pi)))    
+      self.ways.way_changed = False 
+      yield self.forDuration(0.1)
  
   def set_pgain(self, setter):
     self.navigator.PD.set_pgain(setter)
@@ -108,6 +117,50 @@ class SensorPlan( Plan ):
     self.autonomy = setter
 
 
+class way_points:
+  def __init__( self ):
+    self.way_changed = False
+    self.has_ways = False
+    self.WPData = []    
+    self.yn = 0
+    self.xn = 0
+    self.psi = 0
+
+  def newValueCheck(self, newWPData):
+    if (len(newWPData) == len(self.WPData)):  #if waypoint value is empty
+      self.WPData = newWPData #no change in WP data
+    else: #if new WP is different from old WP
+      self.WPData = newWPData #chage WP to new values
+      print "New waypoint values found:"
+      print repr(newWPData)
+      self.yp = newWPData[0][1] #replace the previous waypoint information with the new one we just reached
+      self.xp = newWPData[0][0]
+      self.yn = newWPData[1][1] #the y of new waypoint
+      self.xn = newWPData[1][0]#the x of new waypoint
+      if(self.xp == self.xn and self.yn > self.yp):
+        self.psi = math.pi/2.0
+      elif(self.xp == self.xn and self.yn < self.yp):
+        self.psi = -math.pi/2.0
+      elif(self.yp == self.yn and self.xn > self.xp):
+        self.psi = 0.0
+      elif(self.yp == self.yn and self.xn < self.xp):
+        self.psi = math.pi
+      elif(self.yp == self.yn and self.xn == self.xp):
+        self.psi = math.pi
+      else:
+        self.psi = math.atan((self.yp-self.yn)/(self.xp-self.xn)) #angle of the line
+      if(self.psi < 0):
+        self.psi += math.pi
+      self.x = self.xp #update the estimate position of the robot
+      self.y = self.yp
+      self.way_changed = True
+      self.has_ways = True
+      print(repr(newWPData) + '\n')
+      print("new x: " + str(self.x) + '\n')
+      print("new y: " + str(self.y) + '\n')
+
+
+
 class navigator:
   def __init__(self, robot):
     self.max_speed = .4
@@ -115,8 +168,9 @@ class navigator:
     self.r = robot.at
     self.PD = PD.PD(0.005, 0.1)  
 
-  def navigate(self, estimator, b, f):
+  def navigate(self, estimator, b, f, ways):
     if(f < 3 and b < 3):
+      #self.set_dir(.1)
       return
       # in this case we have most likely lost sensor data.  
       # Wander or try and find the way back
@@ -126,23 +180,23 @@ class navigator:
     # self.error = int(raw_input("enter an error value: "))
     self.correction = self.PD.process(self.error, 1.0)
     self.set_dir(self.correction)
-    progress("error: %s  correction: %s" %  (str(self.error), str(self.correction))) 
+    #  progress("error: %s  correction: %s" %  (str(self.error), str(self.correction))) 
 
-  def turn(self, estimator):
+  def turn(self, estimator, psi):
     # estimator contains both necessary thetas
-  
-    self.error = self.estimator.theta - self.estimator.psi
-   if(self.error > math.pi):
-     self.error -= 2.0*math.pi
-   elif(self.error < -math.pi):
-     self.error += 2.0*math.pi
-  
-   if(self.error < math.pi/8):
-     return False  
+    progress("turning")
+    self.error = estimator.theta - psi
+    #if(self.error > math.pi):
+    #  self.error -= 2.0*math.pi
+    #elif(self.error < -math.pi):
+    #  self.error += 2.0*math.pi
    
-   self.r.LEFT.set_torque(.1)
-   self.r.RIGHT.set_torque(-.1)
-   return True
+    if(self.error < math.pi/8):
+      return False  
+     
+    self.r.LEFT.set_torque(.1)
+    self.r.RIGHT.set_torque(.1)
+    return True
 
   def set_dir(self, direction):
     # direction is value from 1 (right) to -1 (left)
@@ -170,13 +224,18 @@ class state_estimator:
     self.x = 0
     self.y = 0
     self.theta = 0
+    self.theta_1 = 0
+    self.theta_2 = 0
+    self.P1 = .2
+    self.P2 = .8
+    self.d = 38
     
   def estimate_state(self, b, f, encoder_L, encoder_R, ways):
     
     encoder_L += 14026
     encoder_R += 14026 
     self.delta_L = encoder_L - self.L_prev
-    self.delta_R = encoder_R - self.R_prev
+    self.delta_R = -encoder_R + self.R_prev
     if(self.delta_L > encoder_limit/2.0):
       self.delta_L -= encoder_limit
     elif(self.delta_L < -encoder_limit/2.0):
@@ -193,24 +252,36 @@ class state_estimator:
     self.angle_prev = self.angle_est
     
     self.delta_theta = (self.delta_R-self.delta_L) * rad_per_click * wheel_radius/robot_width
+    self.delta_theta /= 2.0
+
     self.delta_x = math.cos(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/2
     self.delta_y = math.sin(self.theta+self.delta_theta/2.0) * (self.delta_L+self.delta_R) * rad_per_click * wheel_radius/2
 		
 
     self.x = self.x + self.delta_x
     self.y = self.y + self.delta_y
-    self.theta = self.theta + self.delta_theta
-    self.theta %= 2.0*math.pi
+    
+    if(ways.way_changed):
+      self.x = ways.x
+      self.y = ways.y
+    
+    self.theta_1 = self.theta + self.delta_theta
+    self.theta_1 %= 2.0*math.pi
 
-    if (self.theta>self.psi)
-    self.theta_2 = (self.psi + math.acos((b+f)/d))
-    elif self.theta_2 = (self.psi - math.acos((b+f)/d))
+    if(b > 4 and f > 4 and ways.has_ways and False):
+      self.psi = ways.psi
 
-
-    print("x: " + str(self.x))
-    print("y: " + str(self.y))
-    print("theta: " + str(self.theta * 180.0/math.pi) + '\n') 
-
+      if((b + f)/self.d > 1):
+        self.theta_2 = self.psi
+      elif (self.theta>self.psi):
+        self.theta_2 = (self.psi + math.acos((b+f)/self.d))
+      else:
+        self.theta_2 = (self.psi - math.acos((b+f)/self.d))
+      
+      self.theta = self.P1*self.theta_1 + self.P2*self.theta_2    
+    else:
+      self.theta = self.theta_1
+     
 class Joy_interface( JoyApp ):
   
   def __init__(self,spec,*arg,**kw): 
@@ -247,8 +318,9 @@ class Joy_interface( JoyApp ):
     
     JoyApp.__init__(self, robot = {'count':3}, *arg,**kw)
     self.teleop = True
+    self.laser_inital_pos = 0
     self.knob_pos = 0
-    self.laser_PD = PD.PD(-79.0/1270.0, -32.0/127.0)
+    self.laser_PD = PD.PD(-79.0/127.0, -32.0/127.0)
     # JoyApp.__init__(self, *arg, **kw)
 
   def onStart( self ):
@@ -259,7 +331,9 @@ class Joy_interface( JoyApp ):
       self.sensor.sensor_enable = False
     if(self.teleop == False):
       self.sensor.set_autonomous(True)    
-
+    self.initial_laser = self.robot.at.LASER.get_pos()
+    
+    
   def onEvent( self, evt ):
     
     if(evt.type == MIDIEVENT):
@@ -300,22 +374,22 @@ class Joy_interface( JoyApp ):
       self.laser_PD_controller()
   
   def laser_PD_controller( self ):
-    self.laser_pos_reading = self.robot.at.LASER.get_pos()
-    self.laser_pos = self.laser_pos_reading + 14016.0
+    self.laser_pos_reading = self.robot.at.LASER.get_pos()    
+
+    self.laser_pos = -self.initial_laser + self.laser_pos_reading + 14016.0*2.0
     if(self.laser_pos > laser_encoder_limit/2.0):
       self.laser_pos -= laser_encoder_limit
     elif(self.laser_pos < -laser_encoder_limit/2.0):
       self.laser_pos += laser_encoder_limit
 
     self.laser_pos *= (math.pi*2.0/laser_encoder_limit)
-    
     self.laser_error = self.laser_pos - (math.pi/2.0 - self.sensor.estimator.theta)
     if(self.laser_error > math.pi):
       self.laser_error -= 2.0*math.pi
     elif(self.laser_error < -math.pi):
       self.laser_error += 2.0*math.pi    
 
-    progress("laser position: %s" % str(self.laser_pos * 180.0/math.pi))
+    # self.laser_error %= 2.0*math.pi
     if(self.laser_pos_reading == 14043.0):
       # upper dead band
       self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
