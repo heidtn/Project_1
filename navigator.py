@@ -149,8 +149,13 @@ class way_points:
         self.psi = math.pi
       else:
         self.psi = math.atan((self.yp-self.yn)/(self.xp-self.xn)) #angle of the line
-      if(self.psi < 0):
+      
+      if(self.xn < self.xp):
         self.psi += math.pi
+
+      if(self.psi < 0):
+        self.psi += 2.0*math.pi
+
       self.x = self.xp #update the estimate position of the robot
       self.y = self.yp
       self.way_changed = True
@@ -335,52 +340,82 @@ class Joy_interface( JoyApp ):
     
     
   def onEvent( self, evt ):
-    
-    if(evt.type == MIDIEVENT):
-      #teleoperation commands
-      if(self.teleop == True):
-        if(evt.kind=='slider' and evt.index==1):
-          if(evt.value < 66 and evt.value > 60):
-            self.robot.at.LEFT.set_torque(0)
+    try:
+      if(evt.type == MIDIEVENT):
+        #teleoperation commands
+        if(self.teleop == True):
+          if(evt.kind=='slider' and evt.index==1):
+            if(evt.value < 66 and evt.value > 60):
+              self.robot.at.LEFT.set_torque(0)
+            else:
+              self.robot.at.LEFT.set_torque((evt.value - 63.5)/(63.5))
+          elif(evt.kind=='slider' and evt.index==2):
+            if(evt.value < 66 and evt.value > 60):
+              self.robot.at.RIGHT.set_torque(0)
+            else:
+              self.robot.at.RIGHT.set_torque(-1*(evt.value - 63.5)/(63.5))
+          elif(evt.kind=='knob' and evt.index==1):
+            self.knob_pos = (evt.value/127.0)*30000.0
+            self.laser_PD_controller()
+          elif(evt.kind=='knob' and evt.index==2):
+            self.laser_PD.set_pgain(-1*evt.value/1270.0)
+          elif(evt.kind=='knob' and evt.index==3):
+            self.laser_PD.set_dgain(-1*evt.value/127.0)
+          elif(evt.kind=='knob' and evt.index==4):
+            self.sensor.set_pgain(-1*evt.value/1270.0)
+          elif(evt.kind=='knob' and evt.index==5):
+            self.sensor.set_dgain(-1*evt.value/127.0)
+
+        if(evt.kind == 'play' and evt.value == 127):
+          self.teleop = not self.teleop
+          self.sensor.set_autonomous(not self.teleop)
+          if(self.teleop):
+            progress("entering teleoperation mode")
           else:
-            self.robot.at.LEFT.set_torque((evt.value - 63.5)/(63.5))
-        elif(evt.kind=='slider' and evt.index==2):
-          if(evt.value < 66 and evt.value > 60):
-            self.robot.at.RIGHT.set_torque(0)
-          else:
-            self.robot.at.RIGHT.set_torque(-1*(evt.value - 63.5)/(63.5))
-        elif(evt.kind=='knob' and evt.index==1):
-          self.knob_pos = (evt.value/127.0)*30000.0
-          self.laser_PD_controller()
-        elif(evt.kind=='knob' and evt.index==2):
-          self.laser_PD.set_pgain(-1*evt.value/1270.0)
-        elif(evt.kind=='knob' and evt.index==3):
-          self.laser_PD.set_dgain(-1*evt.value/127.0)
-        elif(evt.kind=='knob' and evt.index==4):
-          self.sensor.set_pgain(-1*evt.value/1270.0)
-        elif(evt.kind=='knob' and evt.index==5):
-          self.sensor.set_dgain(-1*evt.value/127.0)
-      if(evt.kind == 'play' and evt.value == 127):
+            progress("entering autonomous mode")       
+
+      if(evt.type is KEYDOWN and evt.key in [ord('q'),27]):
+        self.stop()
+
+      if(evt.type is KEYDOWN and self.teleop):
+        if(evt.key in ord('w')):
+          self.robot.at.LEFT.set_torque(.2)
+          self.robot.at.RIGHT.set_torque(-.2)
+        if(evt.key in ord('d')):
+          self.robot.at.LEFT.set_torque(.2)
+          self.robot.at.RIGHT.set_torque(.2)
+        if(evt.key in ord('a')):
+          self.robot.at.LEFT.set_torque(-.2)
+          self.robot.at.RIGHT.set_torque(-.2)
+        if(evt.key in ord('s')):
+          self.robot.at.LEFT.set_torque(-.2)
+          self.robot.at.RIGHT.set_torque(.2)
+      if(evt.type is KEYUP and self.teleop):
+        self.robot.at.LEFT.set_torque(0)
+        self.robot.at.RIGHT.set_torque(0)  
+
+      if(evt.type is KEYDOWN and evt.key in ord('p')):
         self.teleop = not self.teleop
         self.sensor.set_autonomous(not self.teleop)
         if(self.teleop):
           progress("entering teleoperation mode")
         else:
-          progress("entering autonomous mode") 
-    if(evt.type is KEYDOWN and evt.key in [ord('q'),27]):
-      self.stop()
-
-    elif(evt.type == TIMEREVENT):
-      self.laser_PD_controller()
+          progress("entering autonomous mode")
+      
+      if(evt.type == TIMEREVENT):
+        self.laser_PD_controller()
+    except Exception ex:
+      print ex.message
   
   def laser_PD_controller( self ):
     self.laser_pos_reading = self.robot.at.LASER.get_pos()    
 
-    self.laser_pos = -self.initial_laser + self.laser_pos_reading + 14016.0*2.0
-    if(self.laser_pos > laser_encoder_limit/2.0):
+    self.laser_pos = self.laser_pos_reading + 14016.0
+    """if(self.laser_pos > laser_encoder_limit/2.0):
       self.laser_pos -= laser_encoder_limit
     elif(self.laser_pos < -laser_encoder_limit/2.0):
       self.laser_pos += laser_encoder_limit
+    """
 
     self.laser_pos *= (math.pi*2.0/laser_encoder_limit)
     self.laser_error = self.laser_pos - (math.pi/2.0 - self.sensor.estimator.theta)
