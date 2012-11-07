@@ -105,7 +105,7 @@ class SensorPlan( Plan ):
       
       progress("estimated angle:  %s    estimated psi:  %s" % (str(self.estimator.theta * 180.0/math.pi), str(self.ways.psi*180.0/math.pi)))    
       self.ways.way_changed = False 
-      yield self.forDuration(0.1)
+      yield self.forDuration(0.3)
  
   def set_pgain(self, setter):
     self.navigator.PD.set_pgain(setter)
@@ -268,7 +268,7 @@ class state_estimator:
     self.theta_1 = self.theta + self.delta_theta
     self.theta_1 %= 2.0*math.pi
 
-    if(b > 4 and f > 4 and ways.has_ways and False):
+    if(b > 50 and f > 50 and ways.has_ways and False):
       self.psi = ways.psi
 
       if((b + f)/self.d > 1):
@@ -287,6 +287,7 @@ class Joy_interface( JoyApp ):
   def __init__(self,spec,*arg,**kw): 
     self.sensor_enable = True
     self.motor_enable = True    
+    self.teleop = True
 
     try:
       opts, args = getopt.getopt(sys.argv[1:],"hwsma",["wireless","sensor_disable","motor_disable","autonomous_mode"])
@@ -317,10 +318,9 @@ class Joy_interface( JoyApp ):
         self.teleop = False
     
     JoyApp.__init__(self, robot = {'count':3}, *arg,**kw)
-    self.teleop = True
     self.laser_inital_pos = 0
     self.knob_pos = 0
-    self.laser_PD = PD.PD(-79.0/127.0, -32.0/127.0)
+    self.laser_PD = PD.PD(-79.0/1270.0, -32.0/1270.0)
     # JoyApp.__init__(self, *arg, **kw)
 
   def onStart( self ):
