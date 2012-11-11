@@ -223,8 +223,8 @@ class navigator:
 class state_estimator:
   def __init__(self, initial_L, initial_R):
     self.angle_est = math.pi
-    self.L_prev = initial_L
-    self.R_prev = initial_R
+    self.L_prev = initial_L+14026
+    self.R_prev = initial_R+14026
     self.angle_prev = math.pi
     self.x = 0
     self.y = 0
@@ -323,9 +323,9 @@ class Joy_interface( JoyApp ):
         self.teleop = False
     
     JoyApp.__init__(self, robot = {'count':3}, *arg,**kw)
-    self.laser_inital_pos = 0
+    self.laser_initial_pos = -math.pi/2 
     self.knob_pos = 0
-    self.laser_PD = PD.PD(-79.0/1270.0, -32.0/1270.0)
+    self.laser_PD = PD.PD(-790.0/1270.0, -320.0/1270.0)
     # JoyApp.__init__(self, *arg, **kw)
 
   def onStart( self ):
@@ -336,7 +336,7 @@ class Joy_interface( JoyApp ):
       self.sensor.sensor_enable = False
     if(self.teleop == False):
       self.sensor.set_autonomous(True)    
-    self.initial_laser = self.robot.at.LASER.get_pos()
+    self.initial_laser = self.robot.at.LASER.get_pos() + 14016
     
     
   def onEvent( self, evt ):
@@ -357,6 +357,7 @@ class Joy_interface( JoyApp ):
           elif(evt.kind=='knob' and evt.index==1):
             self.knob_pos = (evt.value/127.0)*30000.0
             self.laser_PD_controller()
+           # self.robot.at.LASER.set_pos((evt.value))
           elif(evt.kind=='knob' and evt.index==2):
             self.laser_PD.set_pgain(-1*evt.value/1270.0)
           elif(evt.kind=='knob' and evt.index==3):
@@ -404,8 +405,8 @@ class Joy_interface( JoyApp ):
       
       if(evt.type == TIMEREVENT):
         self.laser_PD_controller()
-    except Exception ex:
-      print ex.message
+    except Exception, ex:
+       print ex.message
   
   def laser_PD_controller( self ):
     self.laser_pos_reading = self.robot.at.LASER.get_pos()    
@@ -416,19 +417,21 @@ class Joy_interface( JoyApp ):
     elif(self.laser_pos < -laser_encoder_limit/2.0):
       self.laser_pos += laser_encoder_limit
     """
-
     self.laser_pos *= (math.pi*2.0/laser_encoder_limit)
+    self.laser_pos -= self.laser_initial_pos
+    self.laser_pos %= math.pi*2
     self.laser_error = self.laser_pos - (math.pi/2.0 - self.sensor.estimator.theta)
     if(self.laser_error > math.pi):
       self.laser_error -= 2.0*math.pi
     elif(self.laser_error < -math.pi):
       self.laser_error += 2.0*math.pi    
-
+    progress("laser pos reading: %s" % (str(self.laser_pos_reading)))
+    #progress("estimated laser angle:  %s	estimated laser error:	%s" % (str(self.laser_pos * 180.0/math.pi), str(self.laser_error * 180.0/math.pi)))    
     # self.laser_error %= 2.0*math.pi
-    if(self.laser_pos_reading == 14043.0):
+    if(self.laser_pos_reading >= 14043.0):
       # upper dead band
       self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
-    elif(self.laser_pos_reading == -14016):
+    elif(self.laser_pos_reading <= -14016):
       # lower dead band
       self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
     else:
