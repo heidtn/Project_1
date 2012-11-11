@@ -89,22 +89,28 @@ class SensorPlan( Plan ):
       self.lpos = self.r.at.LEFT.get_pos()
       self.rpos = self.r.at.RIGHT.get_pos()
       
-      if(self.sensor_enable and self.ways.has_ways):      
-        self.estimator.estimate_state(dic['b'], dic['f'], self.lpos, self.rpos, self.ways)
-      else: 
-        self.estimator.estimate_state(0, 0, self.lpos, self.rpos, self.ways)
-
-      yield
-      if(self.autonomy):
-        if(not self.sensor_enable):
-          dic = {'b':255, 'f':255}
-        if(self.ways.way_changed or self.spinning):
-          self.spinning = self.navigator.turn(self.estimator, self.ways.psi)
+      try:
+        if(self.sensor_enable and self.ways.has_ways):      
+          self.estimator.estimate_state(dic['b'], dic['f'], self.lpos, self.rpos, self.ways)
         else: 
-          self.navigator.navigate(self.estimator, dic['b'], dic['f'], self.ways)
-      
-      progress("estimated angle:  %s    estimated psi:  %s" % (str(self.estimator.theta * 180.0/math.pi), str(self.ways.psi*180.0/math.pi)))    
-      self.ways.way_changed = False 
+          self.estimator.estimate_state(0, 0, self.lpos, self.rpos, self.ways)
+
+        yield
+        if(self.autonomy):
+          if(not self.sensor_enable):
+            dic = {'b':255, 'f':255}
+          if(self.ways.way_changed or self.spinning):
+            self.spinning = self.navigator.turn(self.estimator, self.ways.psi)
+          else: 
+            self.navigator.navigate(self.estimator, dic['b'], dic['f'], self.ways)
+        
+        progress("estimated angle:  %s    estimated psi:  %s" % (str(self.estimator.theta * 180.0/math.pi), str(self.ways.psi*180.0/math.pi)))    
+        self.ways.way_changed = False
+      except Exception, ex:
+        self.r.at.LEFT.set_torque(0)
+        self.r.at.RIGHT.set_torque(0)
+        print ex.message
+        
       yield self.forDuration(0.3)
  
   def set_pgain(self, setter):
@@ -323,7 +329,7 @@ class Joy_interface( JoyApp ):
         self.teleop = False
     
     JoyApp.__init__(self, robot = {'count':3}, *arg,**kw)
-    self.laser_initial_pos = -math.pi/2 
+    self.laser_initial_pos = math.pi/2 
     self.knob_pos = 0
     self.laser_PD = PD.PD(-790.0/1270.0, -320.0/1270.0)
     # JoyApp.__init__(self, *arg, **kw)
@@ -379,23 +385,23 @@ class Joy_interface( JoyApp ):
         self.stop()
 
       if(evt.type is KEYDOWN and self.teleop):
-        if(evt.key in ord('w')):
+        if(evt.key == ord('w')):
           self.robot.at.LEFT.set_torque(.2)
           self.robot.at.RIGHT.set_torque(-.2)
-        if(evt.key in ord('d')):
+        if(evt.key == ord('d')):
           self.robot.at.LEFT.set_torque(.2)
           self.robot.at.RIGHT.set_torque(.2)
-        if(evt.key in ord('a')):
+        if(evt.key == ord('a')):
           self.robot.at.LEFT.set_torque(-.2)
           self.robot.at.RIGHT.set_torque(-.2)
-        if(evt.key in ord('s')):
+        if(evt.key == ord('s')):
           self.robot.at.LEFT.set_torque(-.2)
           self.robot.at.RIGHT.set_torque(.2)
       if(evt.type is KEYUP and self.teleop):
         self.robot.at.LEFT.set_torque(0)
         self.robot.at.RIGHT.set_torque(0)  
 
-      if(evt.type is KEYDOWN and evt.key in ord('p')):
+      if(evt.type is KEYDOWN and evt.key == ord('p')):
         self.teleop = not self.teleop
         self.sensor.set_autonomous(not self.teleop)
         if(self.teleop):
@@ -406,43 +412,50 @@ class Joy_interface( JoyApp ):
       if(evt.type == TIMEREVENT):
         self.laser_PD_controller()
     except Exception, ex:
-       print ex.message
+      self.r.at.LEFT.set_torque(0)
+      self.r.at.RIGHT.set_torque(0)
+      print ex.message
   
   def laser_PD_controller( self ):
-    self.laser_pos_reading = self.robot.at.LASER.get_pos()    
+    try:
+      self.laser_pos_reading = self.robot.at.LASER.get_pos()    
 
-    self.laser_pos = self.laser_pos_reading + 14016.0
-    """if(self.laser_pos > laser_encoder_limit/2.0):
-      self.laser_pos -= laser_encoder_limit
-    elif(self.laser_pos < -laser_encoder_limit/2.0):
-      self.laser_pos += laser_encoder_limit
-    """
-    self.laser_pos *= (math.pi*2.0/laser_encoder_limit)
-    self.laser_pos -= self.laser_initial_pos
-    self.laser_pos %= math.pi*2
-    self.laser_error = self.laser_pos - (math.pi/2.0 - self.sensor.estimator.theta)
-    if(self.laser_error > math.pi):
-      self.laser_error -= 2.0*math.pi
-    elif(self.laser_error < -math.pi):
-      self.laser_error += 2.0*math.pi    
-    progress("laser pos reading: %s" % (str(self.laser_pos_reading)))
-    #progress("estimated laser angle:  %s	estimated laser error:	%s" % (str(self.laser_pos * 180.0/math.pi), str(self.laser_error * 180.0/math.pi)))    
-    # self.laser_error %= 2.0*math.pi
-    if(self.laser_pos_reading >= 14043.0):
-      # upper dead band
-      self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
-    elif(self.laser_pos_reading <= -14016):
-      # lower dead band
-      self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
-    else:
-      self.new_torque =  self.laser_PD.process(self.laser_error, 1.0)
+      self.laser_pos = self.laser_pos_reading + 14016.0
+      """if(self.laser_pos > laser_encoder_limit/2.0):
+        self.laser_pos -= laser_encoder_limit
+      elif(self.laser_pos < -laser_encoder_limit/2.0):
+        self.laser_pos += laser_encoder_limit
+      """
+      self.laser_pos *= (math.pi*2.0/laser_encoder_limit)
+      self.laser_pos -= self.laser_initial_pos
+      self.laser_pos %= math.pi*2
+      self.laser_error = self.laser_pos - (math.pi/2.0 - self.sensor.estimator.theta)
+      if(self.laser_error > math.pi):
+        self.laser_error -= 2.0*math.pi
+      elif(self.laser_error < -math.pi):
+        self.laser_error += 2.0*math.pi    
+      # progress("laser pos reading: %s" % (str(self.laser_pos_reading)))
+      #progress("estimated laser angle:  %s	estimated laser error:	%s" % (str(self.laser_pos * 180.0/math.pi), str(self.laser_error * 180.0/math.pi)))    
+      # self.laser_error %= 2.0*math.pi
+      if(self.laser_pos_reading >= 14043.0):
+        # upper dead band
+        self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
+      elif(self.laser_pos_reading <= -14016):
+        # lower dead band
+        self.new_torque = self.laser_PD.process_deadband(self.laser_error, 1.0)
+      else:
+        self.new_torque =  self.laser_PD.process(self.laser_error, 1.0)
 
-    if(self.new_torque > 1):
-      self.new_torque = 1
-    elif(self.new_torque < -1):
-      self.new_torque = -1
+      if(self.new_torque > 1):
+        self.new_torque = 1
+      elif(self.new_torque < -1):
+        self.new_torque = -1
 
-    self.robot.at.LASER.set_torque(self.new_torque)
+      self.robot.at.LASER.set_torque(self.new_torque)
+    except Exception, ex:
+      self.r.at.LASER.set_torque(0)
+      print ex.message
+   
 
   def onStop( self ):
     self.robot.at.LEFT.go_slack()
