@@ -196,7 +196,7 @@ class navigator:
   def turn(self, estimator, psi):
     # estimator contains both necessary thetas
     progress("turning")
-    self.error = estimator.theta - psi
+    self.error = abs(estimator.theta - psi)
     #if(self.error > math.pi):
     #  self.error -= 2.0*math.pi
     #elif(self.error < -math.pi):
